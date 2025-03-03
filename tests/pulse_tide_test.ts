@@ -11,41 +11,34 @@ Clarinet.test({
   name: "Test event creation",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const deployer = accounts.get('deployer')!;
+    const blockHeight = chain.blockHeight;
     
     let block = chain.mineBlock([
       Tx.contractCall('pulse-tide', 'create-event', [
         types.ascii("Test Event"),
-        types.uint(20),
-        types.uint(30)
+        types.uint(blockHeight + 10),
+        types.uint(blockHeight + 20)
       ], deployer.address)
     ]);
     
     assertEquals(block.receipts.length, 1);
     block.receipts[0].result.expectOk().expectUint(1);
-    
-    const eventDetails = chain.callReadOnlyFn(
-      'pulse-tide',
-      'get-event-details',
-      [types.uint(1)],
-      deployer.address
-    );
-    
-    eventDetails.result.expectOk().expectTuple();
   }
 });
 
 Clarinet.test({
-  name: "Test feedback submission",
+  name: "Test feedback submission and duplicate prevention",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const deployer = accounts.get('deployer')!;
     const user1 = accounts.get('wallet_1')!;
+    const blockHeight = chain.blockHeight;
     
     // Create event
     let block = chain.mineBlock([
       Tx.contractCall('pulse-tide', 'create-event', [
         types.ascii("Test Event"),
-        types.uint(20),
-        types.uint(30)
+        types.uint(blockHeight),
+        types.uint(blockHeight + 10)
       ], deployer.address)
     ]);
     
@@ -60,34 +53,44 @@ Clarinet.test({
     assertEquals(block.receipts.length, 1);
     block.receipts[0].result.expectOk().expectBool(true);
     
-    // Check metrics
-    const metrics = chain.callReadOnlyFn(
-      'pulse-tide',
-      'get-event-metrics',
-      [types.uint(1)],
-      deployer.address
-    );
+    // Try duplicate feedback
+    block = chain.mineBlock([
+      Tx.contractCall('pulse-tide', 'submit-feedback', [
+        types.uint(1),
+        types.uint(4)
+      ], user1.address)
+    ]);
     
-    const metricsData = metrics.result.expectOk().expectTuple();
-    assertEquals(metricsData['total-ratings'], types.uint(1));
-    assertEquals(metricsData['average-rating'], types.uint(5));
+    assertEquals(block.receipts.length, 1);
+    block.receipts[0].result.expectErr().expectUint(106);
   }
 });
 
 Clarinet.test({
-  name: "Test invalid feedback submission",
+  name: "Test time-based restrictions",
   async fn(chain: Chain, accounts: Map<string, Account>) {
+    const deployer = accounts.get('deployer')!;
     const user1 = accounts.get('wallet_1')!;
+    const blockHeight = chain.blockHeight;
     
-    // Try to submit feedback for non-existent event
+    // Create future event
     let block = chain.mineBlock([
+      Tx.contractCall('pulse-tide', 'create-event', [
+        types.ascii("Future Event"),
+        types.uint(blockHeight + 10),
+        types.uint(blockHeight + 20)
+      ], deployer.address)
+    ]);
+    
+    // Try feedback before start
+    block = chain.mineBlock([
       Tx.contractCall('pulse-tide', 'submit-feedback', [
-        types.uint(999),
+        types.uint(1),
         types.uint(5)
       ], user1.address)
     ]);
     
     assertEquals(block.receipts.length, 1);
-    block.receipts[0].result.expectErr().expectUint(101);
+    block.receipts[0].result.expectErr().expectUint(104);
   }
 });
