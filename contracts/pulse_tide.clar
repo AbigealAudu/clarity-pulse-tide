@@ -6,6 +6,9 @@
 (define-constant err-invalid-event (err u101))
 (define-constant err-invalid-rating (err u102))
 (define-constant err-event-ended (err u103))
+(define-constant err-event-not-started (err u104))
+(define-constant err-invalid-time (err u105))
+(define-constant err-duplicate-feedback (err u106))
 
 ;; Data structures
 (define-map events 
@@ -20,13 +23,18 @@
   }
 )
 
+(define-map user-feedback
+  { event-id: uint, user: principal }
+  { submitted: bool }
+)
+
 (define-data-var next-event-id uint u1)
 
 ;; Create new event
 (define-public (create-event (name (string-ascii 64)) (start-time uint) (end-time uint))
   (let ((event-id (var-get next-event-id)))
-    (asserts! (>= start-time block-height) (err u104))
-    (asserts! (> end-time start-time) (err u105))
+    (asserts! (>= start-time block-height) err-invalid-time)
+    (asserts! (> end-time start-time) err-invalid-time)
     
     (map-set events
       { event-id: event-id }
@@ -47,10 +55,17 @@
 
 ;; Submit feedback for an event
 (define-public (submit-feedback (event-id uint) (rating uint))
-  (let ((event (unwrap! (map-get? events { event-id: event-id }) err-invalid-event)))
+  (let (
+    (event (unwrap! (map-get? events { event-id: event-id }) err-invalid-event))
+    (feedback-key { event-id: event-id, user: tx-sender })
+  )
     (asserts! (>= rating u1) err-invalid-rating)
     (asserts! (<= rating u5) err-invalid-rating)
+    (asserts! (>= block-height (get start-time event)) err-event-not-started)
     (asserts! (<= block-height (get end-time event)) err-event-ended)
+    (asserts! (is-none (map-get? user-feedback feedback-key)) err-duplicate-feedback)
+    
+    (map-set user-feedback feedback-key { submitted: true })
     
     (map-set events
       { event-id: event-id }
